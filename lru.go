@@ -1,23 +1,32 @@
 package locache
 
-import "container/list"
+import (
+	"container/list"
+	"sync"
+)
 
 type LruPolicy struct {
-	segment  *cacheSegment
+	lock     sync.RWMutex
 	capacity int
 	dll      *list.List
+	data     map[CacheKey]*list.Element
 }
 
-func NewLruPolicy(cacheSegment *cacheSegment, capacity int) *LruPolicy {
+func NewLruPolicy(capacity int) *LruPolicy {
 	return &LruPolicy{
-		segment:  cacheSegment,
 		capacity: capacity,
 		dll:      list.New(),
+		data:     make(map[CacheKey]*list.Element),
 	}
 }
 
+func (lru *LruPolicy) Setup() {
+	lru.dll = list.New()
+	lru.data = make(map[CacheKey]*list.Element)
+}
+
 func (lru *LruPolicy) Get(key CacheKey) (*CacheEntry, bool) {
-	if element, present := lru.segment.data[key]; present {
+	if element, present := lru.data[key]; present {
 		lru.dll.MoveToFront(element)
 		return extractEntry(element), true
 	}
@@ -25,20 +34,20 @@ func (lru *LruPolicy) Get(key CacheKey) (*CacheEntry, bool) {
 }
 
 func (lru *LruPolicy) Put(entry *CacheEntry) bool {
-	if element, present := lru.segment.data[entry.key]; present {
+	if element, present := lru.data[entry.key]; present {
 		setEntry(element, entry)
 		lru.dll.MoveToFront(element)
 		return true
 	}
 	element := lru.dll.PushFront(entry)
-	lru.segment.data[entry.key] = element
+	lru.data[entry.key] = element
 
 	lru.removeOldIfRequired()
 	return false
 }
 
-func (lru *LruPolicy) Remove(key *CacheKey) bool {
-	if element, present := lru.segment.data[key]; present {
+func (lru *LruPolicy) Remove(key CacheKey) bool {
+	if element, present := lru.data[key]; present {
 		lru.removeElement(element)
 		return true
 	}
@@ -53,6 +62,6 @@ func (lru *LruPolicy) removeOldIfRequired() {
 
 func (lru *LruPolicy) removeElement(element *list.Element) {
 	entry := extractEntry(element)
-	delete(lru.segment.data, entry.key)
+	delete(lru.data, entry.key)
 	lru.dll.Remove(element)
 }
